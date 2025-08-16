@@ -10,71 +10,46 @@ class ModeLauncher:
         self.setup_ui()
         
     def setup_ui(self):
-        # 主視窗設定
         self.root.title("系統啟動器")
-        self.root.geometry("350x250")
+        self.root.geometry("380x260")
+        self.root.minsize(380, 260)  # 保障最小高度
         self.root.resizable(False, False)
-        
-        # 置中顯示視窗
+
         self.center_window()
-        
-        # 主標題
-        title_label = tk.Label(
-            self.root, 
-            text="系統模式選擇", 
-            font=("Arial", 18, "bold"),
-            fg="navy"
-        )
-        title_label.pack(pady=30)
-        
-        # 說明文字
-        desc_label = tk.Label(
-            self.root,
-            text="請選擇要啟動的模式：",
-            font=("Arial", 12)
-        )
-        desc_label.pack(pady=10)
-        
-        # 按鈕框架
+
+        title_label = tk.Label(self.root, text="系統模式選擇", font=("Arial", 18, "bold"), fg="navy")
+        title_label.pack(pady=20)
+
+        self.desc_label = tk.Label(self.root, text="請選擇要啟動的模式：", font=("Arial", 12))
+        self.desc_label.pack(pady=6)
+
+        # 取得檔案存在狀態，決定是否啟用按鈕
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.simulation_script = os.path.join(base_dir, "simulation", "run_script.py")
+        self.physical_script   = os.path.join(base_dir, "physical",   "physical_mode.py")
+
         button_frame = tk.Frame(self.root)
-        button_frame.pack(pady=20)
-        
-        # 模擬模式按鈕
+        button_frame.pack(pady=16)
+
+        # 左右並排的兩顆按鈕
         simulation_btn = tk.Button(
-            button_frame,
-            text="模擬模式",
-            command=self.launch_simulation_mode,
-            font=("Arial", 14),
-            bg="#4CAF50",
-            fg="white",
-            width=12,
-            height=2,
-            cursor="hand2"
+        button_frame, text="模擬模式", command=self.launch_simulation_mode,
+        font=("Arial", 14), bg="#4CAF50", fg="white", width=12, height=2, cursor="hand2",
+        state=tk.NORMAL if os.path.exists(self.simulation_script) else tk.DISABLED
         )
-        simulation_btn.pack(pady=8)
-        
-        # 實體模式按鈕
+        simulation_btn.grid(row=0, column=0, padx=10)
+
         physical_btn = tk.Button(
-            button_frame,
-            text="實體模式", 
-            command=self.launch_physical_mode,
-            font=("Arial", 14),
-            bg="#2196F3",
-            fg="white", 
-            width=12,
-            height=2,
-            cursor="hand2"
+        button_frame, text="實體模式", command=self.launch_physical_mode,
+        font=("Arial", 14), bg="#2196F3", fg="white", width=12, height=2, cursor="hand2",
+        state=tk.NORMAL if os.path.exists(self.physical_script) else tk.DISABLED
         )
-        physical_btn.pack(pady=8)
-        
-        # 狀態列
-        self.status_label = tk.Label(
-            self.root,
-            text="就緒",
-            font=("Arial", 10),
-            fg="gray"
-        )
-        self.status_label.pack(side=tk.BOTTOM, pady=10)
+        physical_btn.grid(row=0, column=1, padx=10)
+
+        self.status_label = tk.Label(self.root, text="就緒", font=("Arial", 10), fg="gray")
+        self.status_label.pack(side=tk.BOTTOM, pady=8)
+
+
         
     def center_window(self):
         """將視窗置中顯示"""
@@ -87,12 +62,19 @@ class ModeLauncher:
         
     def launch_simulation_mode(self):
         """啟動模擬模式"""
-        simulation_script = r"C:\PCBAsimulations\simulation\run_script.py"  # 你的模擬模式程式檔名
+        # 取得目前 launcher_app.py 所在資料夾
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        # 用相對路徑定位 simulation 資料夾底下的 run_script.py
+        simulation_script = os.path.join(base_dir, "simulation", "run_script.py")
         self.launch_program(simulation_script, "模擬模式")
+
         
     def launch_physical_mode(self):
         """啟動實體模式"""
-        physical_script = "physical_mode.py"  # 你的實體模式程式檔名
+        # 取得目前 launcher_app.py 所在資料夾
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        # 用相對路徑定位 simulation 資料夾底下的 run_script.py
+        physical_script = os.path.join(base_dir, "physical", "run_script.py")
         self.launch_program(physical_script, "實體模式")
         
     def launch_program(self, script_name, mode_name):
