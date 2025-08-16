@@ -1,0 +1,12 @@
+{
+  "threshold": 0.8,
+  "yolo": {
+    "model_path": "data/models/yolov8n.pt",
+    "confidence": 0.5,
+    "iou": 0.4
+  },
+  "processing": {
+    "delay": 0.1,
+    "max_records": 10000
+  }
+}
