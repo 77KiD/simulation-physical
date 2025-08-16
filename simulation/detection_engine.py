@@ -1,12 +1,20 @@
 """
 檢測引擎模組
-負責PCBA檢測邏輯和演算法
+負責PCBA檢測邏輯和演算法，整合YOLOv12推論
 """
 
 import time
 import random
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
+
+# 嘗試導入影像處理模組
+try:
+    from image_processor import ImageProcessor
+    IMAGE_PROCESSOR_AVAILABLE = True
+except ImportError:
+    print("⚠️ 影像處理模組未找到，使用簡化檢測")
+    IMAGE_PROCESSOR_AVAILABLE = False
 
 class DetectionEngine:
     """檢測引擎類"""
@@ -15,33 +23,115 @@ class DetectionEngine:
         self.threshold = 0.8
         self.defect_types = ["短路", "斷路", "橋接", "缺件"]
         
+        # 初始化影像處理器
+        if IMAGE_PROCESSOR_AVAILABLE:
+            self.image_processor = ImageProcessor()
+        else:
+            self.image_processor = None
+        
     def detect_pcba(self, frame):
         """
-        PCBA檢測邏輯（簡化版本）
+        PCBA檢測邏輯 (整合YOLOv12)
         
         Args:
             frame: OpenCV影像幀
             
         Returns:
-            tuple: (檢測結果, 缺陷類型, 信心分數)
+            tuple: (檢測結果, 缺陷類型, 信心分數, YOLO檢測結果)
         """
         if frame is None:
-            return "錯誤", "", 0.0
+            return "錯誤", "", 0.0, []
             
-        # 這裡可以加入實際的AI檢測邏輯
-        # 目前使用簡化的檢測邏輯作為示例
+        # 如果有影像處理器，使用AI檢測
+        if self.image_processor:
+            try:
+                # 運行YOLOv12推論
+                _, processed_frame, detections = self.image_processor.process_frame(frame)
+                
+                # 基於YOLO檢測結果進行PCBA品質判斷
+                result, defect_type, confidence = self._analyze_yolo_results(detections)
+                
+                return result, defect_type, confidence, detections
+                
+            except Exception as e:
+                print(f"AI檢測錯誤: {e}")
+                # 回退到簡單檢測
+                return self._simple_detection(frame)
+        else:
+            # 使用簡單檢測
+            return self._simple_detection(frame)
+    
+    def _analyze_yolo_results(self, detections):
+        """
+        分析YOLO檢測結果以判斷PCBA品質
         
+        Args:
+            detections: YOLO檢測結果列表
+            
+        Returns:
+            tuple: (檢測結果, 缺陷類型, 信心分數)
+        """
+        if not detections:
+            return "無法判斷", "", 0.0
+        
+        # 統計檢測到的物件
+        detected_classes = {}
+        max_confidence = 0.0
+        
+        for detection in detections:
+            class_name = detection.class_name
+            confidence = detection.confidence
+            
+            detected_classes[class_name] = detected_classes.get(class_name, 0) + 1
+            max_confidence = max(max_confidence, confidence)
+        
+        # PCBA品質判斷邏輯
+        defect_indicators = ['defect', 'short', 'missing', 'bridge']
+        
+        # 檢查是否有缺陷指標
+        found_defects = []
+        for defect_type in defect_indicators:
+            if defect_type in detected_classes:
+                if defect_type == 'short':
+                    found_defects.append("短路")
+                elif defect_type == 'missing':
+                    found_defects.append("缺件")
+                elif defect_type == 'bridge':
+                    found_defects.append("橋接")
+                else:
+                    found_defects.append("斷路")
+        
+        # 判斷結果
+        if found_defects:
+            return "缺陷", found_defects[0], max_confidence
+        elif 'pcb' in detected_classes and 'component' in detected_classes:
+            # 檢測到PCB和元件，判斷為合格
+            component_count = detected_classes['component']
+            
+            # 基於元件數量和信心度判斷
+            if component_count >= 2 and max_confidence > self.threshold:
+                return "合格", "", max_confidence
+            else:
+                return "缺陷", "元件異常", max_confidence
+        else:
+            # 未能正確識別PCB結構
+            return "缺陷", "結構異常", max_confidence
+    
+    def _simple_detection(self, frame):
+        """
+        簡化的檢測邏輯（備用方案）
+        """
         # 模擬檢測過程
-        time.sleep(0.1)  # 模擬處理時間
+        time.sleep(0.1)
         
         # 基於閾值和隨機因素決定檢測結果
         detection_score = random.random()
         
         if detection_score > self.threshold:
-            return "合格", "", detection_score
+            return "合格", "", detection_score, []
         else:
             defect_type = random.choice(self.defect_types)
-            return "缺陷", defect_type, detection_score
+            return "缺陷", defect_type, detection_score, []
     
     def set_threshold(self, threshold):
         """設置檢測閾值"""
@@ -53,7 +143,7 @@ class DetectionEngine:
     
     def analyze_image(self, frame):
         """
-        分析影像品質和特徵
+        分析影像品質和特徵 (增強版)
         
         Args:
             frame: OpenCV影像幀
@@ -64,7 +154,7 @@ class DetectionEngine:
         if frame is None:
             return {"error": "無效影像"}
         
-        # 計算影像基本特徵
+        # 基本影像分析
         height, width = frame.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
         
@@ -72,22 +162,56 @@ class DetectionEngine:
         mean_brightness = np.mean(gray)
         std_brightness = np.std(gray)
         
-        # 計算邊緣密度（作為複雜度指標）
+        # 計算邊緣密度
         edges = cv2.Canny(gray, 50, 150)
         edge_density = np.sum(edges > 0) / (width * height)
         
-        return {
+        # 如果有影像處理器，獲取額外統計
+        extra_stats = {}
+        if self.image_processor:
+            try:
+                stats = self.image_processor.get_processing_stats()
+                extra_stats.update(stats)
+            except:
+                pass
+        
+        result = {
             "width": width,
             "height": height,
             "mean_brightness": float(mean_brightness),
             "std_brightness": float(std_brightness),
             "edge_density": float(edge_density),
-            "quality_score": self._calculate_quality_score(mean_brightness, std_brightness, edge_density)
+            "quality_score": self._calculate_quality_score(mean_brightness, std_brightness, edge_density),
+            **extra_stats
         }
+        
+        return result
     
     def _calculate_quality_score(self, brightness, std, edge_density):
         """計算影像品質分數"""
         # 簡化的品質評估
+        brightness_score = 1.0 - abs(brightness - 127.5) / 127.5  # 理想亮度約127.5
+        contrast_score = min(std / 50.0, 1.0)  # 標準差越大對比度越好
+        detail_score = min(edge_density * 10, 1.0)  # 適度的邊緣密度
+        
+        return (brightness_score + contrast_score + detail_score) / 3.0
+    
+    def get_processor_config(self):
+        """獲取影像處理器配置"""
+        if self.image_processor:
+            return self.image_processor.config
+        return None
+    
+    def update_processor_config(self, **kwargs):
+        """更新影像處理器配置"""
+        if self.image_processor:
+            self.image_processor.update_config(**kwargs)
+
+class DetectionThread(QThread):
+    """檢測線程 (增強版)"""
+    detection_result = pyqtSignal(str, str, float, list)  # result, defect_type, confidence, yolo_detections
+    sensor_triggered = pyqtSignal()
+    processing_stats = pyqtSignal(dict)  # 處理統計信號估
         brightness_score = 1.0 - abs(brightness - 127.5) / 127.5  # 理想亮度約127.5
         contrast_score = min(std / 50.0, 1.0)  # 標準差越大對比度越好
         detail_score = min(edge_density * 10, 1.0)  # 適度的邊緣密度

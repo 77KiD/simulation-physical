@@ -1,4 +1,39 @@
-"""
+        # 檢測線程
+        self.detection_thread = DetectionThread(self.hardware, self)
+        self.detection_thread.detection_result.connect(self.handle_detection_result)
+        self.detection_thread.sensor_triggered.connect(self.on_sensor_triggered)
+        self.detection_thread.processing_stats.connect(self.update_processing_stats)
+        
+    @pyqtSlot(np.ndarray)
+    def update_camera_display(self, frame):
+        """更新原始相機顯示"""
+        try:
+            # 轉換OpenCV格式到Qt格式
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_frame.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            
+            # 縮放圖像以適應顯示區域
+            pixmap = QPixmap.fromImage(qt_image)
+            scaled_pixmap = pixmap.scaled(self.original_image_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.original_image_display.setPixmap(scaled_pixmap)
+            
+        except Exception as e:
+            print(f"原始相機顯示更新錯誤: {e}")
+    
+    @pyqtSlot(np.ndarray, np.ndarray)
+    def update_processed_display(self, edges_frame, processed_frame):
+        """更新處理後影像顯示"""
+        try:
+            # 轉換處理後影像到Qt格式
+            rgb_processed = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_processed.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(rgb_processed.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            
+            # 縮放圖像以適應顯示區域
+            pixmap = QPixmap.from"""
 PCBA檢測系統主介面
 整合所有模組的主要用戶界面
 """
@@ -28,6 +63,21 @@ try:
 except ImportError:
     print("機械手臂控制界面模組未找到")
     ARM_UI_AVAILABLE = False
+
+# 檢查是否在Jetson環境中運行
+JETSON_ENV = os.path.exists('/etc/nv_tegra_release')
+if JETSON_ENV:
+    print("✅ 檢測到Jetson環境，啟用最佳化設定")
+    
+    # 嘗試導入Jetson最佳化的影像處理器
+    try:
+        from jetson_image_processor import JetsonImageProcessor
+        JETSON_PROCESSOR_AVAILABLE = True
+    except ImportError:
+        print("⚠️ Jetson最佳化處理器未找到，使用標準處理器")
+        JETSON_PROCESSOR_AVAILABLE = False
+else:
+    JETSON_PROCESSOR_AVAILABLE = False
 
 class PCBADetectionSystem(QMainWindow):
     """PCBA檢測系統主界面"""
@@ -61,8 +111,17 @@ class PCBADetectionSystem(QMainWindow):
         
     def init_ui(self):
         """初始化用戶界面"""
-        self.setWindowTitle("PCBA 智能檢測控制系統 v2.0 - 模組化版本")
-        self.setGeometry(100, 100, 1400, 900)
+        title = "PCBA 智能檢測控制系統 v2.0 - 雙視窗AI版本"
+        if JETSON_ENV:
+            title += " (Jetson Orin Nano)"
+        
+        self.setWindowTitle(title)
+        
+        # Jetson環境下使用較小的視窗尺寸
+        if JETSON_ENV:
+            self.setGeometry(50, 50, 1200, 750)  # 較小尺寸適應Jetson螢幕
+        else:
+            self.setGeometry(100, 100, 1400, 900)
         
         # 創建中央窗口
         central_widget = QWidget()
@@ -87,38 +146,132 @@ class PCBADetectionSystem(QMainWindow):
         # 設置分割器比例
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
-        splitter.setSizes([840, 560])
+        
+        # Jetson環境下使用較小的尺寸
+        if JETSON_ENV:
+            splitter.setSizes([720, 480])
+        else:
+            splitter.setSizes([840, 560])
         
     def create_left_panel(self):
-        """創建左側面板（相機影像和控制面板）"""
+        """創建左側面板（雙視窗相機影像和控制面板）"""
         left_widget = QWidget()
         left_layout = QVBoxLayout()
         left_widget.setLayout(left_layout)
         
-        # 相機影像區域
-        camera_group = QGroupBox("📷 相機影像")
+        # 雙視窗相機影像區域
+        camera_group = QGroupBox("📷 即時影像監控")
         camera_layout = QVBoxLayout()
         
-        self.image_display = QLabel("影像即時預覽區")
-        self.image_display.setMinimumHeight(400)
-        self.image_display.setAlignment(Qt.AlignCenter)
-        self.image_display.setStyleSheet("""
+        # 影像顯示標籤
+        image_label = QLabel("影像顯示控制")
+        image_label.setFont(QFont("Microsoft JhengHei", 10, QFont.Bold))
+        camera_layout.addWidget(image_label)
+        
+        # 雙視窗影像顯示區域
+        image_container = QHBoxLayout()
+        
+        # 左側：原始即時影像
+        original_group = QGroupBox("🎥 即時影像")
+        original_layout = QVBoxLayout()
+        
+        self.original_image_display = QLabel("即時影像預覽區")
+        # Jetson環境下使用較小的顯示區域
+        display_height = 250 if JETSON_ENV else 300
+        display_width = 300 if JETSON_ENV else 320
+        
+        self.original_image_display.setMinimumHeight(display_height)
+        self.original_image_display.setMinimumWidth(display_width)
+        self.original_image_display.setAlignment(Qt.AlignCenter)
+        self.original_image_display.setStyleSheet("""
             QLabel {
-                border: 2px dashed #ccc;
+                border: 2px solid #4CAF50;
                 border-radius: 6px;
                 background-color: #f8f9fa;
-                font-size: 16px;
+                font-size: 14px;
                 font-weight: bold;
                 color: #666;
             }
         """)
+        original_layout.addWidget(self.original_image_display)
+        original_group.setLayout(original_layout)
         
-        camera_layout.addWidget(self.image_display)
+        # 右側：處理後影像 (邊緣檢測 + YOLOv12)
+        processed_group = QGroupBox("🤖 AI分析影像")
+        processed_layout = QVBoxLayout()
+        
+        self.processed_image_display = QLabel("AI分析影像\n(邊緣檢測 + YOLOv12推論)")
+        self.processed_image_display.setMinimumHeight(display_height)
+        self.processed_image_display.setMinimumWidth(display_width)
+        self.processed_image_display.setAlignment(Qt.AlignCenter)
+        self.processed_image_display.setStyleSheet("""
+            QLabel {
+                border: 2px solid #2196F3;
+                border-radius: 6px;
+                background-color: #f0f8ff;
+                font-size: 14px;
+                font-weight: bold;
+                color: #666;
+            }
+        """)
+        processed_layout.addWidget(self.processed_image_display)
+        processed_group.setLayout(processed_layout)
+        
+        image_container.addWidget(original_group)
+        image_container.addWidget(processed_group)
+        camera_layout.addLayout(image_container)
+        
+        # 影像處理控制區域
+        processing_control_group = QGroupBox("🔧 影像處理控制")
+        processing_layout = QGridLayout()
+        
+        # 邊緣檢測參數
+        processing_layout.addWidget(QLabel("邊緣檢測低閾值:"), 0, 0)
+        self.canny_low_slider = QSlider(Qt.Horizontal)
+        self.canny_low_slider.setRange(10, 100)
+        self.canny_low_slider.setValue(50)
+        self.canny_low_value = QLabel("50")
+        self.canny_low_slider.valueChanged.connect(self.update_canny_low)
+        processing_layout.addWidget(self.canny_low_slider, 0, 1)
+        processing_layout.addWidget(self.canny_low_value, 0, 2)
+        
+        processing_layout.addWidget(QLabel("邊緣檢測高閾值:"), 1, 0)
+        self.canny_high_slider = QSlider(Qt.Horizontal)
+        self.canny_high_slider.setRange(100, 300)
+        self.canny_high_slider.setValue(150)
+        self.canny_high_value = QLabel("150")
+        self.canny_high_slider.valueChanged.connect(self.update_canny_high)
+        processing_layout.addWidget(self.canny_high_slider, 1, 1)
+        processing_layout.addWidget(self.canny_high_value, 1, 2)
+        
+        # 對比度增強參數
+        processing_layout.addWidget(QLabel("對比度增強:"), 2, 0)
+        self.contrast_slider = QSlider(Qt.Horizontal)
+        self.contrast_slider.setRange(50, 300)
+        self.contrast_slider.setValue(150)
+        self.contrast_value = QLabel("1.5")
+        self.contrast_slider.valueChanged.connect(self.update_contrast)
+        processing_layout.addWidget(self.contrast_slider, 2, 1)
+        processing_layout.addWidget(self.contrast_value, 2, 2)
+        
+        # YOLO信心閾值
+        processing_layout.addWidget(QLabel("YOLO信心閾值:"), 3, 0)
+        self.yolo_conf_slider = QSlider(Qt.Horizontal)
+        self.yolo_conf_slider.setRange(10, 95)
+        self.yolo_conf_slider.setValue(50)
+        self.yolo_conf_value = QLabel("0.50")
+        self.yolo_conf_slider.valueChanged.connect(self.update_yolo_conf)
+        processing_layout.addWidget(self.yolo_conf_slider, 3, 1)
+        processing_layout.addWidget(self.yolo_conf_value, 3, 2)
+        
+        processing_control_group.setLayout(processing_layout)
+        camera_layout.addWidget(processing_control_group)
+        
         camera_group.setLayout(camera_layout)
         left_layout.addWidget(camera_group)
         
-        # 控制面板
-        control_group = QGroupBox("⚙️ 控制面板")
+        # 控制面板 (原有控制項)
+        control_group = QGroupBox("⚙️ 系統控制面板")
         control_layout = QVBoxLayout()
         
         # 主要控制按鈕
@@ -135,7 +288,7 @@ class PCBADetectionSystem(QMainWindow):
         
         # 檢測門檻值控制
         threshold_layout = QHBoxLayout()
-        threshold_layout.addWidget(QLabel("檢測門檻值:"))
+        threshold_layout.addWidget(QLabel("PCBA檢測門檻值:"))
         self.threshold_value = QLabel("0.80")
         threshold_layout.addWidget(self.threshold_value)
         
@@ -421,15 +574,17 @@ class PCBADetectionSystem(QMainWindow):
         # 相機線程
         self.camera_thread = CameraThread(self.hardware)
         self.camera_thread.frame_ready.connect(self.update_camera_display)
+        self.camera_thread.processed_frame_ready.connect(self.update_processed_display)
         
         # 檢測線程
         self.detection_thread = DetectionThread(self.hardware, self)
         self.detection_thread.detection_result.connect(self.handle_detection_result)
         self.detection_thread.sensor_triggered.connect(self.on_sensor_triggered)
+        self.detection_thread.processing_stats.connect(self.update_processing_stats)
         
     @pyqtSlot(np.ndarray)
     def update_camera_display(self, frame):
-        """更新相機顯示"""
+        """更新原始相機顯示"""
         try:
             # 轉換OpenCV格式到Qt格式
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -439,15 +594,33 @@ class PCBADetectionSystem(QMainWindow):
             
             # 縮放圖像以適應顯示區域
             pixmap = QPixmap.fromImage(qt_image)
-            scaled_pixmap = pixmap.scaled(self.image_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.image_display.setPixmap(scaled_pixmap)
+            scaled_pixmap = pixmap.scaled(self.original_image_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.original_image_display.setPixmap(scaled_pixmap)
             
         except Exception as e:
-            print(f"相機顯示更新錯誤: {e}")
+            print(f"原始相機顯示更新錯誤: {e}")
     
-    @pyqtSlot(str, str, float)
-    def handle_detection_result(self, result, defect_type, confidence):
-        """處理檢測結果"""
+    @pyqtSlot(np.ndarray, np.ndarray)
+    def update_processed_display(self, edges_frame, processed_frame):
+        """更新處理後影像顯示"""
+        try:
+            # 轉換處理後影像到Qt格式
+            rgb_processed = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_processed.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(rgb_processed.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            
+            # 縮放圖像以適應顯示區域
+            pixmap = QPixmap.fromImage(qt_image)
+            scaled_pixmap = pixmap.scaled(self.processed_image_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.processed_image_display.setPixmap(scaled_pixmap)
+            
+        except Exception as e:
+            print(f"處理後影像顯示更新錯誤: {e}")
+    
+    @pyqtSlot(str, str, float, list)
+    def handle_detection_result(self, result, defect_type, confidence, yolo_detections):
+        """處理檢測結果 (增強版)"""
         # 添加記錄到數據管理器
         record = self.data_manager.add_record(result, defect_type, confidence)
         
@@ -457,7 +630,78 @@ class PCBADetectionSystem(QMainWindow):
         # 更新統計顯示
         self.update_statistics_display()
         
+        # 記錄YOLO檢測詳細結果
+        if yolo_detections:
+            detection_info = f"檢測到 {len(yolo_detections)} 個物件: "
+            for detection in yolo_detections[:3]:  # 只顯示前3個
+                detection_info += f"{detection.class_name}({detection.confidence:.2f}) "
+            print(f"🤖 YOLO檢測: {detection_info}")
+        
         print(f"檢測結果: {result}, 缺陷: {defect_type}, 信心度: {confidence:.2f}")
+    
+    @pyqtSlot(dict)
+    def update_processing_stats(self, stats):
+        """更新處理統計資訊"""
+        try:
+            fps = stats.get('fps', 0)
+            inference_time = stats.get('inference_time', 0)
+            yolo_available = stats.get('yolo_available', False)
+            
+            # 更新相機狀態顯示
+            status_text = f"相機狀態：🟢 正常 (FPS: {fps:.1f})"
+            if yolo_available:
+                status_text += f" | YOLOv12: {inference_time*1000:.1f}ms"
+            else:
+                status_text += " | YOLOv12: 模擬模式"
+            
+            self.camera_status.setText(status_text)
+            
+        except Exception as e:
+            print(f"統計更新錯誤: {e}")
+    
+    # 影像處理參數更新方法
+    def update_canny_low(self):
+        """更新Canny低閾值"""
+        value = self.canny_low_slider.value()
+        self.canny_low_value.setText(str(value))
+        
+        # 更新檢測線程的處理參數
+        if self.detection_thread:
+            self.detection_thread.update_processor_config(canny_low=value)
+        
+        # 更新相機線程的處理參數
+        if self.camera_thread:
+            self.camera_thread.update_processor_config(canny_low=value)
+    
+    def update_canny_high(self):
+        """更新Canny高閾值"""
+        value = self.canny_high_slider.value()
+        self.canny_high_value.setText(str(value))
+        
+        if self.detection_thread:
+            self.detection_thread.update_processor_config(canny_high=value)
+        if self.camera_thread:
+            self.camera_thread.update_processor_config(canny_high=value)
+    
+    def update_contrast(self):
+        """更新對比度增強"""
+        value = self.contrast_slider.value() / 100.0
+        self.contrast_value.setText(f"{value:.1f}")
+        
+        if self.detection_thread:
+            self.detection_thread.update_processor_config(contrast_alpha=value)
+        if self.camera_thread:
+            self.camera_thread.update_processor_config(contrast_alpha=value)
+    
+    def update_yolo_conf(self):
+        """更新YOLO信心閾值"""
+        value = self.yolo_conf_slider.value() / 100.0
+        self.yolo_conf_value.setText(f"{value:.2f}")
+        
+        if self.detection_thread:
+            self.detection_thread.update_processor_config(yolo_confidence=value)
+        if self.camera_thread:
+            self.camera_thread.update_processor_config(yolo_confidence=value)
     
     @pyqtSlot()
     def on_sensor_triggered(self):
