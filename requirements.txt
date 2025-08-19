@@ -1,37 +1,36 @@
-# PCBA檢測系統依賴套件清單
-# 安裝指令: pip install -r requirements.txt
+# ===== Core GUI & Vision (必裝) =====
+# PyQt5：建議 5.15.x；避免 6.x 破壞 API 相容
+PyQt5>=5.15.9,<6
+PyQt5-sip<13
 
-# 基礎套件
-numpy>=1.21.0
-opencv-python>=4.5.0
-PyQt5>=5.15.0
+# OpenCV：一般 x86_64 建議使用 opencv-python；伺服器或無顯示環境可改 headless
+opencv-python>=4.8.0 ; platform_machine != "aarch64"
+# 若在 Linux 無桌面或 CI，請改用下行（改成解除註解）：
+# opencv-python-headless>=4.8.0
 
-# AI和機器學習
-torch>=1.9.0
-torchvision>=0.10.0
-ultralytics>=8.0.0
+# Numpy：與多數電腦視覺套件相容的範圍
+numpy>=1.23,<2.0
 
-# 資料處理和分析
-pandas>=1.3.0
-matplotlib>=3.4.0
-pillow>=8.0.0
+# CSV、雜項工具（若程式會寫報表 / 讀寫設定建議保留）
+pandas>=2.0.0
+pyyaml>=6.0.1
 
-# 硬體控制套件 (可選 - 僅在有實際硬體時需要)
-# 註解掉的套件需要時手動安裝
-# adafruit-circuitpython-pca9685>=3.4.0
-# adafruit-circuitpython-motor>=3.4.0
-# adafruit-blinka>=6.0.0
+# 聲音提示（若使用 QSound，PyQt5 已含；此列留作相容）
+# simpleaudio>=1.0.4
 
-# Jetson專用套件 (僅Jetson平台)
-# Jetson.GPIO>=2.0.0
+# ===== Hardware / Jetson（視需求）=====
+# I2C 與 PCA9685 控制（實體模式用得到）
+smbus2>=0.4.3 ; platform_system == "Linux"
+adafruit-circuitpython-servokit>=1.3.16
+Adafruit-Blinka>=8.0.0
 
-# 開發和測試工具
-pytest>=6.0.0
-pytest-qt>=4.0.0
+# ===== AI/YOLO（選配）=====
+# ★ 如果需要 AI 偵測，才解除下列註解安裝 ★
+# Ultralytics（YOLOv8/YOLOv12 前端）
+# ultralytics>=8.3.0
 
-# 代碼品質工具
-black>=21.0.0
-flake8>=3.9.0
-
-# 文檔生成
-sphinx>=4.0.0
+# PyTorch：依平台安裝對應版本與 CUDA（Jetson 請用官方 wheel 或 Jetson-AI-Lab 來源）
+# 下列版本號僅作參考；請依你的平台調整
+# torch==2.6.0
+# torchvision==0.21.0
+# torchaudio==2.6.0
